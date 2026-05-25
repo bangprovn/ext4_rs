@@ -56,7 +56,13 @@ impl Ext4 {
     pub fn open(block_device: Arc<dyn BlockDevice>) -> Self {
         // Load the superblock
         let block = Block::load(&block_device, SUPERBLOCK_OFFSET);
-        let super_block: Ext4Superblock = block.read_as();
+        let mut super_block: Ext4Superblock = block.read_as();
+
+        // Non-64bit ext4 images store 0 in `s_desc_size`; fix it up so
+        // downstream `desc_size` arithmetic doesn't divide by zero.
+        if super_block.desc_size < EXT4_MIN_BLOCK_GROUP_DESCRIPTOR_SIZE {
+            super_block.desc_size = EXT4_MIN_BLOCK_GROUP_DESCRIPTOR_SIZE;
+        }
 
         // drop(block);
 

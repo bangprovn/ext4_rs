@@ -87,6 +87,42 @@ impl Ext4 {
         return_errno_with_message!(Errno::EIO, "search extent fail");
     }
 
+    /// Reader-facing variant of [`Self::get_pblock_idx`]. Returns
+    /// `Ok(None)` when `lblock` falls in a sparse hole (no extent
+    /// covers it) or is part of an "unwritten" extent — in both cases
+    /// Linux treats the data as zero-filled regardless of what the
+    /// underlying physical blocks contain. Returns `Ok(Some(pblock))`
+    /// when a real extent backs `lblock`. Callers that need to fault
+    /// data must zero-fill the destination buffer when this returns
+    /// `None` instead of reading the device.
+    pub fn get_pblock_idx_for_read(
+        &self,
+        inode_ref: &Ext4InodeRef,
+        lblock: Ext4Lblk,
+    ) -> Result<Option<Ext4Fsblk>> {
+        let path = self.find_extent(inode_ref, lblock)?;
+        let last = match path.path.last() {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        let ext = match last.extent {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        if ext.is_unwritten() {
+            return Ok(None);
+        }
+        // `binsearch_extent` returns the floor extent without checking
+        // that lblock actually lies within it — a file with holes will
+        // get the previous extent. Verify the range so holes don't
+        // silently return stale physical data.
+        let ext_len = ext.get_actual_len() as u32;
+        if lblock < ext.first_block || lblock >= ext.first_block + ext_len {
+            return Ok(None);
+        }
+        Ok(Some(last.pblock))
+    }
+
     /// Allocate a new block
     pub fn allocate_new_block(&self, inode_ref: &mut Ext4InodeRef) -> Result<Ext4Fsblk> {
         let mut super_block = self.super_block;

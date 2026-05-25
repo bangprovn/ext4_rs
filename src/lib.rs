@@ -1,4 +1,3 @@
-#![feature(error_in_core)]
 #![no_std]
 #![allow(unused)]
 
@@ -10,8 +9,8 @@ pub mod utils;
 pub use prelude::*;
 pub use utils::*;
 
-mod ext4_defs;
-mod ext4_impls;
+pub mod ext4_defs;
+pub mod ext4_impls;
 
 pub mod fuse_interface;
 pub mod simple_interface;

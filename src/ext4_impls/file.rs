@@ -205,26 +205,29 @@ impl Ext4 {
         if unaligned_start_offset > 0 {
             let adjust_read_size = min(BLOCK_SIZE - unaligned_start_offset, read_buf_len);
 
-            // get iblock physical block id
-            let pblock_idx = match self.get_pblock_idx(&inode_ref, iblock as u32) {
-                Ok(idx) => idx,
-                Err(e) => {
+            // Sparse / unwritten extent => zero-fill instead of reading
+            // stale physical contents.
+            match self.get_pblock_idx_for_read(&inode_ref, iblock as u32) {
+                Ok(Some(pblock_idx)) => {
+                    let data = self
+                        .block_device
+                        .read_offset(pblock_idx as usize * BLOCK_SIZE);
+                    read_buf[cursor..cursor + adjust_read_size].copy_from_slice(
+                        &data[unaligned_start_offset..unaligned_start_offset + adjust_read_size],
+                    );
+                }
+                Ok(None) => {
+                    for b in &mut read_buf[cursor..cursor + adjust_read_size] {
+                        *b = 0;
+                    }
+                }
+                Err(_) => {
                     return_errno_with_message!(
                         Errno::EIO,
                         "Failed to get physical block for logical block"
                     );
                 }
-            };
-
-            // read data
-            let data = self
-                .block_device
-                .read_offset(pblock_idx as usize * BLOCK_SIZE);
-
-            // copy data to read buffer
-            read_buf[cursor..cursor + adjust_read_size].copy_from_slice(
-                &data[unaligned_start_offset..unaligned_start_offset + adjust_read_size],
-            );
+            }
 
             // update cursor and total bytes read
             cursor += adjust_read_size;
@@ -246,25 +249,26 @@ impl Ext4 {
                 }
             }
 
-            // get iblock physical block id
-            let pblock_idx = match self.get_pblock_idx(&inode_ref, iblock as u32) {
-                Ok(idx) => idx,
-                Err(e) => {
+            match self.get_pblock_idx_for_read(&inode_ref, iblock as u32) {
+                Ok(Some(pblock_idx)) => {
+                    let data = self
+                        .block_device
+                        .read_offset(pblock_idx as usize * BLOCK_SIZE);
+                    read_buf[cursor..cursor + read_length].copy_from_slice(&data[..read_length]);
+                }
+                Ok(None) => {
+                    // Sparse / unwritten extent — read as zeros.
+                    for b in &mut read_buf[cursor..cursor + read_length] {
+                        *b = 0;
+                    }
+                }
+                Err(_) => {
                     return_errno_with_message!(
                         Errno::EIO,
                         "Failed to get physical block for logical block"
                     );
                 }
-            };
-
-            // read data
-            let data = self
-                .block_device
-                .read_offset(pblock_idx as usize * BLOCK_SIZE);
-            // log::trace!("[Read] Read block data - physical_block: {}, data_len: {}", pblock_idx, data.len());
-
-            // copy data to read buffer
-            read_buf[cursor..cursor + read_length].copy_from_slice(&data[..read_length]);
+            }
 
             // update cursor and total bytes read
             cursor += read_length;
