@@ -651,9 +651,14 @@ mod tests {
         assert_eq!(extent.first_block, 10);
         assert_eq!(pos, 1);
 
-        // Search for a block outside the extents
+        // Search for a block past the last extent. `binsearch_extent`
+        // returns the floor extent without checking coverage (callers verify
+        // the range themselves), so this yields the last extent, not None.
         let result = node.binsearch_extent(20);
-        assert!(result.is_none());
+        assert!(result.is_some());
+        let (extent, pos) = result.unwrap();
+        assert_eq!(extent.first_block, 10);
+        assert_eq!(pos, 1);
     }
 
     #[test]
