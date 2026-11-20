@@ -279,7 +279,12 @@ impl ExtentNode {
 }
 
 impl ExtentNode {
-    /// Binary search for the extent that contains the given block.
+    /// Binary search for the extent that contains the given block, or the
+    /// closest extent that starts before it (like Linux `ext4_ext_binsearch`).
+    ///
+    /// The returned extent does not necessarily cover `lblock`: callers such as
+    /// `insert_extent` rely on getting the preceding extent so they can append
+    /// to or merge with it. Check coverage with `first_block`/`block_count`.
     pub fn binsearch_extent(&mut self, lblock: Ext4Lblk) -> Option<(Ext4Extent, usize)> {
         // empty node
         if self.header.entries_count == 0 {
@@ -651,9 +656,13 @@ mod tests {
         assert_eq!(extent.first_block, 10);
         assert_eq!(pos, 1);
 
-        // Search for a block outside the extents
+        // A block past the last extent returns the closest preceding extent
+        // (needed by insert_extent to append/merge); it does not cover block 20.
         let result = node.binsearch_extent(20);
-        assert!(result.is_none());
+        let (extent, pos) = result.expect("closest preceding extent");
+        assert_eq!(extent.first_block, 10);
+        assert_eq!(pos, 1);
+        assert!(20 >= extent.first_block + extent.block_count as u32);
     }
 
     #[test]
